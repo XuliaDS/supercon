@@ -1,4 +1,3 @@
-###
 import numpy
 import math
 import unittest
@@ -60,6 +59,8 @@ def evaluate_at_points(mesh, z, eID):
     shapeT, shapeDT = Discretization.MasterElement.MasterElement.orthopolyEdges(
                             mesh.theMasterElementU.theNodes[:,0],
                             z, mesh.theDegreeU)
+
+
 
     X  = numpy.dot(shapeX,  mesh.theNodes                  [mesh.theElementsX[eID,:],:])
     T  = numpy.dot(shapeT,  mesh.theParametricNodes        [mesh.theElementsU[eID,:],:])
@@ -138,8 +139,8 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
                 self.x[i], self.dx[i], self.t[i], self.dt[i] = evaluate_at_points(mesh, self.z, i)
                 self.aot[i]     = parametrization.value(self.t[i])
                 self.daot[i]    = parametrization.tangent(self.t[i])
-                self.daot[i,:] *= self.dt[i]
-                self.err[i]     = vf.signed_norm(dim, Q, self.aot[i] - self.x[i] , self.dx[i])
+                #self.daot[i,:] *= self.dt[i]
+                self.err[i]     = vf.signed_norm(dim, Q, self.x[i] - self.aot[i] , self.dx[i])
 
 
     @staticmethod
@@ -152,7 +153,7 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
         showLeg   = False
         if showPlots == 2:
             visType = eEPS
-        elif showPlots == 1:
+        else:# showPlots == 1:
             showLeg = True
             visType = eScreen
         tolDistanceCalculation = 1.e-12
@@ -160,7 +161,7 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
 
         disparity             = numpy.zeros([nR + 1])
 
-        gp                    = 100
+        gp                    = 24
         objectiveFunctionName = "Intrinsic"
         frechetFunctionName   = "Intrinsic"
         if (dim == 1): parametrization = TestDistanceFunctionOptimization.getGeometry1D(curve, I[0], I[1])
@@ -193,6 +194,11 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
 
 
         disparity_repro = numpy.zeros((n_poly_tests, nR + 1))
+        l2_e_fx = numpy.zeros((nR + 1))
+        l2_e_fa = numpy.zeros((nR + 1))
+        l2_t_fx = numpy.zeros((nR + 1))
+        l2_t_fa = numpy.zeros((nR + 1))
+        l2_t_wh = numpy.zeros((nR + 1))
         for ref in range(nR + 1):
             h = (parametrization.theT1 - parametrization.theT0) / (pow (2, ref) * ne)
             optimizer = Optimization.DistanceFunction.DistanceFunctionOptimization.DistanceFunctionOptimization(
@@ -217,6 +223,12 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
                                     mesh,parametrization,frechetFunctionName,
                                     tolDistanceCalculation, gp - 1)
 
+
+            newMasterElementX = mesh.theMasterElementMakerX.createMasterElement(pX, gp-1)
+            newMasterElementU = mesh.theMasterElementMakerU.createMasterElement(pT, gp-1)
+            mesh.theMasterElementX = newMasterElementX
+            mesh.theMasterElementU = newMasterElementU
+
             disparity[ref]  = disf * disf * 0.5
             zex   = numpy.empty((n *  gp, 1))
             # Element Boundaries
@@ -237,7 +249,7 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
             en_exp_by_mode     = numpy.zeros((n_poly_tests, pE + 1, n * gp))
             ed_exp_by_mode     = numpy.zeros((n_poly_tests, pE + 1, n * gp))
 
-            aot_exp_by_mode    = numpy.zeros((n_poly_tests, pS + 1, n * gp, dim))
+            aot_exp_by_mode    = numpy.zeros((n_poly_tests, pT + 1, n * gp, dim))
             x_poly_exp_by_mode = numpy.empty((n_poly_tests, pX + 1, n * gp, dim))
 
 
@@ -256,21 +268,43 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
 
 
                 for e in range(n):
+                    x_i     = mesh.getXElement(e)
+                    dx_i    = mesh.getDNXElement(e)
+                    for j in range(gp):
+                        print(' dx ', dx_i[j], m_sample.dx[e,j])
+                        print(' x ', x_i[j], m_sample.x[e,j])
+                    plt.plot(m_sample.z, x_i)
+                    plt.plot(m_sample.z,m_sample.x[e])
+                    plt.show()
+                    dist = vf.xnorm(dim, 1, m_sample.x[e,-1] - m_sample.x[e,0])
+                    arclength = 0.5 * dist
                     polyX     = polynomial.polynomial(dim, pX, reconstruction[pt], poly_type[pt], m_sample.z, \
                                                        m_sample.w, eQT, m_sample.x[e])
+
                     # try l2 large t
                     polyA     = polynomial.polynomial(dim, pT, reconstruction[pt], poly_type[pt], m_sample.z, \
                                                        m_sample.w, eQT, m_sample.aot[e])
 
 
-                    diff_x  = abs(polyX.value   - m_sample.x[e])
-                    diff_dx = abs(polyX.tangent - m_sample.dx[e,:,:,0]  )
-                    print(' error in x ', diff_x.sum(axis=0), ' error in dx ', diff_dx.sum(axis=0))
-                    diff_t  = abs(polyA.value   - m_sample.aot[e])
-                    diff_dt = abs(polyA.tangent - m_sample.daot[e,:,0]  )
-                    print(' error in x ', diff_x.sum(axis=0), ' error in dx ', diff_dx.sum(axis=0))
+                    polyE      = polynomial.polynomial(1, pE, reconstruction[pt], poly_type[pt], m_sample.z, \
+                                                       m_sample.w, eQT, m_sample.err[e])
 
+                    Jx   = vf.xnorm(dim, gp, m_sample.dx[e])
+                    je   = mesh.getDXElement(e)
+
+                    Ja   = vf.xnorm(dim, gp, m_sample.daot[e])
+                    polyJX     =  polynomial.polynomial(1, 0, reconstruction[pt], poly_type[pt], m_sample.z, \
+                                                           m_sample.w, eQT, Jx)
+
+
+                    polyJA     =  polynomial.polynomial(1, 0, reconstruction[pt], poly_type[pt], m_sample.z, \
+                                                           m_sample.w, eQT, Ja)
                     frenet_frame = True
+                    sum = 0.0
+                    for j in range(gp):
+                        dxa = numpy.dot(m_sample.x[e,j] - m_sample.aot[e,j], m_sample.daot[e,j,:,0])
+                        sum += dxa ** 2 * m_sample.w[j]
+                    l2_t_wh[ref] += sum * polyJX.value[0]
                     if (frenet_frame == True):
 
                         Ta    = numpy.zeros((gp,2))
@@ -303,8 +337,6 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
                         def frenet_n_2d(T):
                             return [-T[1], T[0] ]
 
-                        Jx      = vf.xnorm(dim, gp, m_sample.dx[e])
-                        Ja      = vf.xnorm(dim, gp, m_sample.daot[e])
                         kappa_x = numpy.zeros(gp)
                         kappa_a = numpy.zeros(gp)
                         txta    = numpy.zeros(gp)
@@ -321,241 +353,288 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
                             kappa_x[j] = abs(polyX.tangent[j,0] * polyX.hessian[j,1] - polyX.tangent[j,1] * polyX.hessian[j,0]) / numpy.power(Jx[j],3)
                             kappa_a[j] = abs(polyA.tangent[j,0] * polyA.hessian[j,1] - polyA.tangent[j,1] * polyA.hessian[j,0]) / numpy.power(Ja[j],3)
 
-
                             # Get coordinates base alpha
                             a_fa[j]  = frenet_base_2d(Ta[j], Na[j], m_sample.aot[e,j])
                             x_fa[j]  = frenet_base_2d(Ta[j], Na[j],   m_sample.x[e,j])
                             e_fa[j]  = x_fa[j] - a_fa[j]
 
-                            da_fa[j] = [ Ja[j] + kappa_a[j] * a_fa[j,1],
-                                               - kappa_a[j] * a_fa[j,0] ]
-                            dx_fa[j] = [ Jx[j] * txta[j] + kappa_a[j] * x_fa[j,1],
-                                         Jx[j] * txna[j] - kappa_a[j] * x_fa[j,0]]
+                            da_fa[j] = [ Ja[j] + kappa_a[j] * Ja[j] * a_fa[j,1],
+                                               - kappa_a[j] * Ja[j] * a_fa[j,0] ]
+                            dx_fa[j] = [ Jx[j] * txta[j] + kappa_a[j] * Ja[j] * x_fa[j,1],
+                                         Jx[j] * txna[j] - kappa_a[j] * Ja[j] * x_fa[j,0]]
                             de_fa[j] = dx_fa[j] - da_fa[j]
 
                             # Get coordinates base x
                             a_fx[j]  = frenet_base_2d(Tx[j], Nx[j], m_sample.aot[e,j])
-                            x_fx[j]  = frenet_base_2d(Tx[j], Nx[j], m_sample.x[e,j])
+                            x_fx[j]  = frenet_base_2d(Tx[j], Nx[j],   m_sample.x[e,j])
                             e_fx[j]  = x_fx[j] - a_fx[j]
 
-                            da_fx[j] = [ Ja[j] * txna[j] + kappa_x[j] * a_fx[j,1],
-                                         Ja[j] * txna[j] - kappa_x[j] * a_fx[j,0]]
-                            dx_fx[j] = [ Jx[j] + kappa_x[j] * x_fx[j,1],
-                                               - kappa_x[j] * x_fx[j,0] ]
+                            da_fx[j] = [ Ja[j] * txta[j] + kappa_x[j] * Jx[j] * a_fx[j,1],
+                                         Ja[j] * txna[j] - kappa_x[j] * Jx[j] * a_fx[j,0]]
+                            dx_fx[j] = [ Jx[j] + kappa_x[j] * Jx[j] * x_fx[j,1],
+                                               - kappa_x[j] * Jx[j] * x_fx[j,0] ]
 
                             de_fx[j] = dx_fx[j] - da_fx[j]
 
-                            c1 = dx_fa[j,0] * Ta[j] + dx_fa[j,1] * Na[j]
-                            c2 = da_fx[j,0] * Tx[j] + da_fx[j,1] * Nx[j]
+                            c1 = x_fa[j,0] * Ta[j] + x_fa[j,1] * Na[j]
+                            c2 = a_fx[j,0] * Tx[j] + a_fx[j,1] * Nx[j]
 
-                            da = vf.xnorm(2,1,c1.T -   m_sample.dx[e,j,:,0])
-                            de = vf.xnorm(2,1,c2.T - m_sample.daot[e,j,:,0])
+                            da = vf.xnorm(2,1,c1.T -   m_sample.x[e,j])
+                            de = vf.xnorm(2,1,c2.T - m_sample.aot[e,j])
                             if (da > 1.e-12 or de > 1.e-12):
                                 print(' caghada! Failed to change basis !!?? ',da, de)
 
-                        plt.show()
-                        P_0p    = polyX.getBasis(pX + 1, m_sample.z, gp)
-                        # check 1
-                        lhs  = numpy.zeros((gp,2))
-                        rhs  = numpy.zeros((gp,2))
-                        sumX = 0.0
+
+
+                        # STRONG EQUATIONS
+                        xeq_x = numpy.zeros((gp, 2))
+                        teq_x = numpy.zeros(gp)
+                        xeq_a = numpy.zeros((gp, 2))
+                        teq_a = numpy.zeros(gp)
+                        it_l2a = 0.0
+                        it_l2x = 0.0
+                        sa = 0.0
+                        set = 0.0
+                        test_t = 0.0
                         for j in range (gp):
-
-                            #lhs[j] =  dx_fa[j,0] * Ta[j] + dx_fa[j,1] * Na[j]
-                            #rhs[j] = m_sample.dx[e,j,:,0]
-                            lhs[j] = (x_fa[j,1] - a_fa[j,1]) * kappa_x[j]#* e_fa[j,0 ]#de_fa[j,1]
-
-                            rhs[j] =  - 2.0 * txna[j]  # * e_fa[j,0]#Jx[j] * txna[j] - kappa_a[j] * e_fa[j,0]#Jx[j] * txna[j] #e_fa[j,1] * kappa_x[j]
-                            #rhs[j] = kappa_a[j] * (-e_fa[j,0])#     -2.0 * txta[j]
-                            print( ' lhs ', lhs[j], ' rhs ', rhs[j])
-                            sumX += (lhs[j] - rhs[j] )* m_sample.w[j]
-                        print(' sum is ', sumX)
-                        plt.subplot(2,1,1)
-                    #    errAn.myplot(m_sample.z, lhs[:,0], xp,0, 'TxTa')
-                        errAn.myplot(m_sample.z, lhs[:,0], xp,0, 'TxTa')
-                        errAn.myplot(m_sample.z, rhs[:,0], xp,1, 'TxTa')
-                        #errAn.myplot(m_sample.z, rhs[:,0], xp,1, 'TxTa')
-                        plt.subplot(2,1,2)
-                        #errAn.myplot(m_sample.z, lhs[:,1], xp,0, 'TxTa')
-                        errAn.myplot(m_sample.z, rhs[:,0] - lhs[:,0], xp,1, 'TxTa')
-
-                        plt.show()
-
-                        plt.subplot(2,1,1)
-                        errAn.myplot(m_sample.z, lhs[:,0], xp,0, 'TxTa')
-                        errAn.myplot(m_sample.z, rhs[:,0], xp,1, 'TxTa')
-                        errAn.myplot(m_sample.z, -Na[:,0], xp,3, 'TxTa')
-
-                        plt.subplot(2,1,2)
-                        errAn.myplot(m_sample.z, lhs[:,1], xp,0, 'TxTa')
-                        errAn.myplot(m_sample.z, rhs[:,1], xp,1, 'TxTa')
-                        errAn.myplot(m_sample.z, -Na[:,1], xp,3, 'TxTa')
-
-                        plt.show()
-                        basisQ = polyX.getBasis(pT + 1, m_sample.z, gp)
-                        for j in range (gp):
-                            lhs[j] = txta[j] * txna[j]
-                            rhs[j] = extn[j,0] * 0.5 * kappa[j]
-                        for i in range(pT + 1):
-                            sumL   = 0.0
-                            sumR   = 0.0
-                            for j in range (gp):
-                                sumL += lhs[j] * basisQ[j][i] * m_sample.w[j]
-                                sumR += rhs[j] * basisQ[j][i] * m_sample.w[j]
-                            print(' i  = ',' integrals ', sumL, sumR)
-
-                        for j in range (gp):
-
-                            lhs[j] = txna[j] / txta[j] * Jx[j] * kappa[j] * (eatn[j,0]**2 + eatn[j,1]**2)
-                            rhs[j] = -deatn[j,0] * eatn[j,0] - deatn[j,1] * eatn[j,1]
-                            lhs[j] =  Jx[j] * txna[j]
-                            rhs[j] = deatn[j,1]
-
-                        plt.subplot(1,2,1)
-                        errAn.myplot(m_sample.z, lhs, xp,0, 'TxTa')
-                        errAn.myplot(m_sample.z, lhs, xp,1, 'TxTa')
-                        plt.subplot(1,2,2)
-                        errAn.myplot(m_sample.z, lhs - rhs, xp,0, 'TxTa')
-
-                        plt.show()
-                        quit()
-
-                        rs_e    = numpy.zeros(gp)
-                        rs_de   = numpy.zeros(gp)
-                        ek      = numpy.zeros(gp)
-                        l2d     = numpy.zeros((gp, dim))
-                        r2d     = numpy.zeros((gp, dim))
-                        eq_t    = numpy.zeros(gp)
-                        eq_n    = numpy.zeros(gp)
-
-                        for j in range (gp):
-                            #kappa[j] = 1.0 / abs(polyX.tangent[j,0] * polyX.hessian[j,1] - polyX.tangent[j,1] * polyX.hessian[j,0]  )
-                            kappa[j] = abs(polyX.tangent[j,0] * polyX.hessian[j,1] - polyX.tangent[j,1] * polyX.hessian[j,0]) / numpy.power(Jx[j],3)
-                            dx       = numpy.sqrt(polyX.tangent[j,0]**2 + polyX.tangent[j,1] **2 )
-                            ek[j]    = 0.5 * etn[j,1] * kappa[j] * Jx[j]
-
-                            rs_e[j]  = detn[j,1] * txta[j] + ek[j] * txna[j]
-                            rs_de[j] = detn[j,1] * txna[j] - ek[j] * txta[j]
-
-                            t1       = (etn[j,0] * T[j] + etn[j,1] * N[j]) * Jx[j]
-                            t2       = (detn[j,0] * etn[j,0] + detn[j,1] * etn[j,1] ) * Tx[j]
-                            t3       = 0.5 * (etn[j,0]** 2 + etn[j,1]** 2) * Jx[j] * kappa[j] * Nx[j]
-                            l2d[j]   = t1 - t2 + t3##detn[j,1] * Tx[j]   - ek[j] * Nx[j]
-                            r2d[j,0] = numpy.dot(l2d[j], T[j])
-                            r2d[j,1] = numpy.dot(l2d[j], N[j])
-                            eq_t[j]  = txta[j] * txna[j]
-                            eq_n[j]  = 0.5 * etn[j,0] * kappa[j]
+                            #test_t += Jx[j] * numpy.dot(m_sample.x[e,j] - m_sample.aot[e,j], m_sample.daot[e,j,:,0])  * m_sample.w[j]
+                            c0 = m_sample.dx[e,j,0,0] -1.0
+                            c1 = m_sample.dx[e,j,1,0] -  6.0 * (3.0 * m_sample.t[e,j] + 1.0)
+                            test_t += c0**2 + c1 ** 2
+                            print(' TEST ', test_t, ' c0 ', c0, c1)
+                            #test_t += m_sample.z[j]* m_sample.w[j]
 
 
-                        plt.subplot(1,2,1)
-                        errAn.myplot(m_sample.z, eq_t, xp,0, 'TxTa')
-                        plt.subplot(1,2,2)
-                        errAn.myplot(m_sample.z, eq_n, xp,1, 'TxTa')
-                        plt.show()
+                            teq_a[j] = Jx[j] * Ja[j] * e_fa[j,0]
+                            teq_x[j] = Jx[j] * Ja[j] * (e_fx[j,0] * txta[j] + e_fx[j,1] * txna[j])
+
+                            teq_a[j] = Ja[j] * e_fa[j,0]
+                            teq_x[j] = Ja[j] * (e_fx[j,0] * txta[j] + e_fx[j,1] * txna[j])
+                            it_l2a  +=  e_fa[j,0]**2 * m_sample.w[j] #* polyJ.value[j]
 
 
+                            aux = (e_fx[j,0] * txta[j] - e_fx[j,1] * txna[j])
+                            it_l2x += Ja[j]**2 * e_fa[j,0]**2 * m_sample.w[j]#* polyJ.value[j]
+                            a = (e_fa[j,0] * Ta[j] + e_fa[j,1] * Na[j]) * Jx[j]
+                            b = (de_fa[j,0] * e_fa[j,0] + de_fa[j,1] * e_fa[j,1]) * Tx[j]
+                            c = 0.5 * (e_fa[j,0] **2 + e_fa[j,1]** 2) * Jx[j] * kappa_x[j] * Nx[j]
+                            xeq_a[j] = a - b - c
+                            a = (e_fx[j,0] * Tx[j] + e_fx[j,1] * Nx[j]) * Jx[j]
+                            b = (de_fx[j,0] * e_fx[j,0] + de_fx[j,1] * e_fx[j,1]) * Tx[j]
+                            c = 0.5 * (e_fx[j,0] **2 + e_fx[j,1]** 2) * Jx[j] * kappa_x[j] * Nx[j]
+                            xeq_x[j] = a - b - c
+                            sa  +=   Jx[j] * m_sample.w[j]# numpy.dot(m_sample.dx[e,j,:,0],m_sample.dx[e,j,:,0])  * m_sample.w[j]
+                            set +=   Ja[j] ** 2 * m_sample.w[j]#     e_fa[j,0] ** 2 * m_sample.w[j]
+                        print(' TEST IS ', test_t)
+                        print(' err JX POLY ', abs (sa - polyJX.value[0] * 2.0))
+                        l2_t_fa[ref] += sa #* polyJA.value[0] * polyJX.value[0]  #it_l2a * polyJ.value[0] #arclength
+                        l2_t_fx[ref] += set #* polyJ.value[0] #* set * polyJ.value[0] ** 2 # * sa #* polyJ.value[0]**2 #arclength
+                        print( ' E IS ',e,' POLY J ', polyJX.value[0])
+                        if n == 1:
+                            plt.suptitle(' eq t ')
+                            plt.subplot(2,1,1)
+                            errAn.myplot(m_sample.z, teq_x, xp,0, ' ')
+                            errAn.myplot(m_sample.z, teq_a, xp,1, ' ')
+                            plt.subplot(2,1,2)
+                            errAn.myplot(m_sample.z, teq_a - teq_x, xp,1, ' ')
+                            #plt.show()
+                            plt.suptitle(' eq x ')
 
-
-
-                        plt.subplot(1,2,1)
-                        errAn.myplot(m_sample.z, rs_e, xp,0, 'TxTa')
-                        errAn.myplot(m_sample.z,  detn[:,1] * txta, xp,1, 'TxTa')
-
-                        plt.subplot(1,2,2)
-                        errAn.myplot(m_sample.z, rs_e - detn[:,1], xp,0, 'TxTa')
-
-                        plt.legend()
-                        plt.show()
-
-                        plt.subplot(1,2,1)
-                        errAn.myplot(m_sample.z, abs(rs_de), xp,0, 'TxTa')
-                        errAn.myplot(m_sample.z, abs(ek * txta) , xp,1, 'TxTa')
-                        #errAn.myplot(m_sample.z, Jx, xp,2, 'TxTa')
-
-
-                        plt.subplot(1,2,2)
-                        errAn.myplot(m_sample.z, rs_e - ek * txta, xp,0, 'TxTa')
-                        #errAn.myplot(m_sample.z, rs_de,xp, 1, 'TxNa')
-                        plt.legend()
-                        plt.show()
-                        for i in range (pX + 1):
-                            l2L_de = 0
-                            l2R_de = 0
-                            l2L_e  = 0
-                            l2R_e  = 0
-                            for j in range (gp):
-                                l2L_de += detn[j,1] * P_0p[j,i] * m_sample.w[j]
-                                l2L_e  +=  etn[j,1] * P_0p[j,i] * m_sample.w[j]
-
-                                l2R_de += rs_de[j] * P_0p[j,i] * m_sample.w[j]
-                                l2R_e  +=  rs_e[j] * P_0p[j,i] * m_sample.w[j]
-
-                            print ('  equation en   mode = ', i, '--> ',l2L_e,'=', l2R_e,' error ', numpy.abs(l2L_e - l2R_e))
-                            print ('  equation edot mode = ', i, '--> ',l2L_de,'=', l2R_de,' error ', numpy.abs(l2L_de - l2R_de))
-
-                        if (visType == eScreen) :
                             plt.subplot(2,2,1)
-                            errAn.myplot(m_sample.z, detn[:,1],xp, 0, 'edot_n')
-                            errAn.myplot(m_sample.z, rs_de,xp, 2, 'Jx * sin(theta)')
-                            errAn.fig_params('%1.1f', '%1.e',m_sample.z,  detn[:,1], m_sample.z, rs_de , 2, '$\\xi$')
-                            plt.xticks([], [])
-                            plt.xlabel(None)
-                            plt.legend()
+                            errAn.myplot(m_sample.z, xeq_x[:,0], xp,0, ' ')
+                            errAn.myplot(m_sample.z, xeq_a[:,0], xp,1, ' ')
                             plt.subplot(2,2,2)
-                            errAn.myplot(m_sample.z, detn[:,1] - rs_de,xp, 2, 'error')
-                            errAn.fig_params1('%1.1f', '%1.e',m_sample.z, abs( detn[:,1] - rs_de)  , 2, '$\\xi$')
-                            plt.xticks([], [])
-                            plt.xlabel(None)
-                            plt.legend()
-                            plt.subplot(2,2,3)
-                            errAn.myplot(m_sample.z, etn[:,1],xp, 0, 'e_n')
-                            errAn.myplot(m_sample.z, rs_e,xp, 2, 'kappa * Jx')
-                            errAn.fig_params('%1.1f', '%1.e',m_sample.z,  etn[:,1], m_sample.z, rs_e , 2, '$\\xi$')
-                            plt.xticks([], [])
-                            plt.xlabel(None)
-                            plt.legend()
-                            plt.subplot(2,2,4)
-                            errAn.myplot(m_sample.z, etn[:,1] - rs_e,xp, 2, 'error')
-                            errAn.fig_params1('%1.1f', '%1.e',m_sample.z, abs(etn[:,1] - rs_e) , 2, '$\\xi$')
-                            plt.xticks([], [])
-                            plt.xlabel(None)
-                            plt.legend()
-                            plt.show()
-                        else:
-                            errAn.fig_header(fcount, visType)
-                            errAn.myplot(m_sample.z, detn[:,1],xp, 0, 'edot_n')
-                            errAn.myplot(m_sample.z, rs_de,xp, 2, 'Jx * sin(theta)')
-                            errAn.fig_params('%1.1f', '%1.e',m_sample.z,  detn[:,1], m_sample.z, rs_de , 2, '$\\xi$')
-                            plt.xticks([], [])
-                            plt.xlabel(None)
-                            plt.savefig('results/edot_weak_p' + str(pX) +'.eps', bbox_inches='tight', pad_inches=0)
-                            plt.close()
-                            errAn.myplot(m_sample.z, detn[:,1],xp, 0, 'edot_n')
-                            errAn.myplot(m_sample.z, rs_de,xp, 2, 'Jx * sin(theta)')
-                            errAn.fig_params('%1.1f', '%1.e',m_sample.z, abs( detn[:,1]), m_sample.z, rs_de , 2, '$\\xi$')
-                            plt.xticks([], [])
-                            plt.xlabel(None)
-                            plt.savefig('results/abs_edot_weak_p' + str(pX)+'.eps', bbox_inches='tight', pad_inches=0)
-                            plt.close()
-                            errAn.myplot(m_sample.z, detn[:,1] - rs_de,xp, 2, 'error')
-                            errAn.fig_params1('%1.1f', '%1.e',m_sample.z, abs( detn[:,1])- rs_de , 2, '$\\xi$')
-                            plt.xticks([], [])
-                            plt.xlabel(None)
-                            plt.savefig('results/edot_err_p' + str(pX)+'.eps', bbox_inches='tight', pad_inches=0)
-                            plt.close()
+                            errAn.myplot(m_sample.z, xeq_a[:,0] - xeq_x[:,0], xp,1, ' ')
 
-                            quit()
+                            plt.subplot(2,2,3)
+                            errAn.myplot(m_sample.z, xeq_x[:,1], xp,0, ' ')
+                            errAn.myplot(m_sample.z, xeq_a[:,1], xp,1, ' ')
+                            plt.subplot(2,2,4)
+                            errAn.myplot(m_sample.z, xeq_a[:,1] - xeq_x[:,1], xp,1, ' ')
+
+                        #plt.show()
+
+                        # NOW ALONG Ta Na , Tx Nx
+                        eta_t = numpy.zeros(gp)
+                        eta_n = numpy.zeros(gp)
+                        ena_t = numpy.zeros(gp)
+                        ena_n = numpy.zeros(gp)
+
+                        etx_t = numpy.zeros(gp)
+                        etx_n = numpy.zeros(gp)
+                        enx_t = numpy.zeros(gp)
+                        enx_n = numpy.zeros(gp)
+
+
+                        t_x = numpy.zeros((2, gp))
+                        t_a = numpy.zeros((2, gp))
+                        lhs = numpy.zeros(gp)
+                        rhs = numpy.zeros(gp)
+
+                        if n == 1:
+                            plt.subplot(2,1,1)
+                            errAn.myplot(m_sample.z, e_fa[:,1], xp, 0, ' ')
+                            plt.subplot(2,1,2)
+                            errAn.myplot(m_sample.z, de_fa[:,1], xp, 0, ' ')
+                            plt.show()
+                        et_x = numpy.zeros(2)
+                        en_x = numpy.zeros(2)
+                        et_a = numpy.zeros(2)
+                        en_a = numpy.zeros(2)
+                        eta = 0.0
+                        etx = 0.0
+                        for j in range (gp):
+
+                            eta_t[j] = e_fa[j,0] * (Jx[j] - de_fa[j,0] * txta[j] - 0.5 * e_fa[j,0] * kappa_x[j] * Jx[j] * (-txna[j]))
+                            eta_n[j] = e_fa[j,1] * (        de_fa[j,1] * txta[j] + 0.5 * e_fa[j,1] * kappa_x[j] * Jx[j] * (-txna[j]))
+
+                            ena_t[j] = e_fa[j,0] * (         de_fa[j,0] * txna[j] - 0.5 * e_fa[j,0] * kappa_x[j] * Jx[j] * txta[j])
+                            ena_n[j] = e_fa[j,1] * (-Jx[j] + de_fa[j,1] * txna[j] + 0.5 * e_fa[j,1] * kappa_x[j] * Jx[j] * txta[j])
+
+
+                            etx_t[j] = e_fx[j,0] * (Jx[j] - de_fx[j,0])
+                            etx_n[j] = e_fx[j,1] * de_fx[j,1]
+
+                            enx_t[j] = 0.5 * e_fx[j,0]**2 * kappa_x[j] * Jx[j]
+                            enx_n[j] = e_fx[j,1] * Jx[j] * (1.0 - 0.5 * e_fx[j,1] * kappa_x[j])
+
+                            #t_a[0,j] = e_fa[j,0] * Jx[j] * Ja[j]
+                            t_a[0,j] = e_fa[j,0] * Ja[j]
+
+                            t_a[1,j] = 0.0
+                            #t_x[0,j] = e_fx[j,0] * txta[j] * Jx[j] * Ja[j]
+                            #t_x[1,j] = e_fx[j,1] * txna[j] * Jx[j] * Ja[j]
+                            t_x[0,j] = e_fx[j,0] * txta[j] * Ja[j]
+                            t_x[1,j] = e_fx[j,1] * txna[j] * Ja[j]
+
+                            et_x =  e_fx[j,0] * Tx[j] * Jx[j] - e_fx[j,0] * de_fx[j,0] * Tx[j] - \
+                                               0.5 * e_fx[j,0]**2 * Jx[j] * kappa_x[j] * Nx[j]
+
+                            en_x  =  e_fx[j,1] * Nx[j] * Jx[j] - e_fx[j,1] * de_fx[j,1] * Tx[j] -\
+                                                0.5 * e_fx[j,1]**2 * Jx[j] * kappa_x[j] * Nx[j]
+
+                                                ###################
+                            et_a =  e_fa[j,0] * Ta[j] * Jx[j] - e_fa[j,0] * de_fa[j,0] * Tx[j] - \
+                                               0.5 * e_fa[j,0]**2 * Jx[j] * kappa_x[j] * Nx[j]
+
+                            en_a  = e_fa[j,1] * Na[j] * Jx[j] - e_fa[j,1] * de_fa[j,1] * Tx[j] -\
+                                                0.5 * e_fa[j,1]**2 * Jx[j] * kappa_x[j] * Nx[j]
+
+                            aux  = en_a  + et_a
+
+                            #l2_e_fa[ref] += (aux[0]**2 + aux[1] **2) *  m_sample.w[j] * Jx[j]
+
+                            aux[0] = 0.0#ena_t[j] #+ eta_t[j]
+                            aux[1] = e_fa[j,1] * Jx[j] * (e_fa[j,1] * 0.5 * kappa_x[j] -1.0)  #ena_n[j] #+ eta_n[j]
+
+                            #l2_e_fx[ref] +=  (aux[0]**2 + aux[1] **2) *  m_sample.w[j] * Jx[j]
+                            auxa = e_fa[j,0] * de_fa[j,0] - e_fa[j,1] * (de_fa[j,1] + Jx[j])
+                            auxx = e_fx[j,0] * (    Jx[j] - de_fx[j,0]) - e_fx[j,1] * de_fx[j,1]
+
+                            eta += auxa**2 * m_sample.w[j]
+                            etx += auxx**2 * m_sample.w[j]
+
+                        l2_e_fx[ref] += eta * polyJX.value[0]
+                        l2_e_fa[ref] += etx * polyJX.value[0]
+
+                        if n == 1:
+                            plt.suptitle (' check simplify ')
+                            plt.subplot(2,1,1)
+                            errAn.myplot(m_sample.z, lhs, xp, 0, ' ')
+                            errAn.myplot(m_sample.z, rhs, xp, 2, ' ')
+                            #errAn.myplot(m_sample.z, e_fa[:,1], xp, 3, ' ')
+
+                            plt.subplot(2,1,2)
+                            errAn.myplot(m_sample.z, lhs -  rhs, xp, 0, ' ')
+                            plt.show()
+
+                        '''
+                        plt.close()
+                        plt.suptitle('  TIMES NX TX  ')
+                        plt.subplot(2,4,1)
+                        plt.title( 'T DIRECTION  JUST ET ')
+                        errAn.myplot(m_sample.z, e_fx[:,0], xp,2, 'et_x')
+                        errAn.myplot(m_sample.z, e_fa[:,0], xp,3, 'et_a')
+                        plt.legend()
+
+                        plt.subplot(2,4,2)
+                        plt.title( 'T DIRECTION  --> eT')
+                        errAn.myplot(m_sample.z, abs(eta_t), xp,0, 'a')
+                        errAn.myplot(m_sample.z, abs(etx_t), xp,1, 'x')
+
+
+                        plt.legend()
+                        plt.subplot(2,4,3)
+                        plt.title('T DIRECTION  --> eN')
+                        errAn.myplot(m_sample.z, abs(eta_n), xp,0, 'a')
+                        errAn.myplot(m_sample.z, abs(etx_n), xp,1, 'x')
+                        plt.legend()
+                        plt.subplot(2,4,4)
+                        errAn.myplot(m_sample.z, abs(etx_t - etx_n), xp,0, 'et_x - en_x')
+                        errAn.myplot(m_sample.z, abs(eta_t - eta_n), xp,1, 'et_a - en_a')
+                        plt.legend()
+                        plt.subplot(2,4,5)
+                        plt.title( 'T DIRECTION  JUST EN')
+
+                        errAn.myplot(m_sample.z, e_fx[:,1], xp,2, 'en_x')
+                        errAn.myplot(m_sample.z, e_fa[:,1], xp,3, 'en_a')
+
+                        plt.legend()
+
+                        plt.subplot(2,4,6)
+                        plt.title( 'N DIRECTION  --> eT')
+                        errAn.myplot(m_sample.z, abs(ena_t), xp,0, 'a')
+                        errAn.myplot(m_sample.z, abs(enx_t), xp,1, 'x')
+                        plt.legend()
+                        plt.subplot(2,4,7)
+                        plt.title( 'N DIRECTION  --> eN')
+                        errAn.myplot(m_sample.z, abs(ena_n), xp,0, 'a')
+                        errAn.myplot(m_sample.z, abs(enx_n), xp,1, 'x')
+                        plt.legend()
+                        plt.subplot(2,4,8)
+                        errAn.myplot(m_sample.z, abs(enx_t - enx_n), xp,0, 'et_x - en_x')
+                        errAn.myplot(m_sample.z, abs(ena_t - ena_n), xp,1, 'et_a - en_a')
+                        plt.legend()
+                        plt.show()
+
+                        plt.subplot(2,2,1)
+                        plt.title( ' T SOLUTION IN TA NA ')
+                        errAn.myplot(m_sample.z, t_a[0], xp,0, 'et')
+                        errAn.myplot(m_sample.z, t_a[1], xp,2, 'en')
+                        plt.legend()
+                        plt.subplot(2,2,2)
+                        plt.title( ' ERROR  ')
+                        errAn.myplot(m_sample.z, abs(t_a[0] - t_a[1]), xp,0, 'error')
+                        plt.legend()
+                        plt.subplot(2,2,3)
+
+                        plt.title( ' T SOLUTION IN TA NA ')
+                        errAn.myplot(m_sample.z, t_x[0], xp,0, 'et')
+                        errAn.myplot(m_sample.z, t_x[1], xp,2, 'en')
+                        plt.legend()
+                        plt.subplot(2,2,4)
+                        plt.title( ' ERROR  ')
+                        errAn.myplot(m_sample.z, abs(t_x[0]- t_x[1]), xp,0, 'error')
+                        plt.legend()
+                        plt.show()
+
+                        quit()'''
+
+
+
 
                     polyET = polynomial.polynomial(1, pE, reconstruction[pt], poly_type[pt], m_sample.z, \
-                                                       m_sample.w, eQT, etn[:,0] )
+                                                       m_sample.w, eQT, e_fa[:,0] )
 
                     polyEN = polynomial.polynomial(1, pE, reconstruction[pt], poly_type[pt], m_sample.z, \
-                                                       m_sample.w, eQT, etn[:,1] )
+                                                       m_sample.w, eQT, e_fa[:,1] )
 
                     polyED = polynomial.polynomial(1, pE, reconstruction[pt], poly_type[pt], m_sample.z, \
                                                        m_sample.w, eQT, m_sample.err[e])
 
-                    sumXA  = 0.0
+                    sumXA0  = 0.0
+                    sumXA1 = 0.0
+                    legb = polyJX.getBasis(2, m_sample.z, gp)
                     for j in range(gp):
 
                         zex        [   gp * e + j]   = 0.5 * ( (eBD[e + 1] - eBD[e]) * m_sample.z[j] + eBD[e + 1] + eBD[e] )
@@ -567,7 +646,7 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
                         aot        [   gp * e + j]   = m_sample.aot[e,j]
                         aot_poly   [pt,gp * e + j]   = polyA.value[j]
 
-                        errTN      [   gp * e + j]   = etn[j]
+                        errTN      [   gp * e + j]   = e_fa[j]
                         errTN_poly [pt,gp * e + j,0] = polyET.value[j]
                         errTN_poly [pt,gp * e + j,1] = polyEN.value[j]
 
@@ -576,15 +655,16 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
 
                         derx    = vf.xnorm(dim, 1, m_sample.dx[e,j])
                         err_int = abs(m_sample.err[e,j])
-                        sumXA  += err_int * err_int * derx * m_sample.w[j]
-
-                    disparity_repro[pt,ref] += sumXA * 0.5
-
+                        sumXA0 += err_int **2 * m_sample.w[j] #* legb[j][0] * polyJ.node[0]
+                    #    sumXA1 += 0.0#err_int **2 * m_sample.w[j] * legb[j][1] * polyJ.node[1]
+                    #sumXA1 = 0.0
+                    #disparity_repro[pt,ref] += (sumXA0 * 0.5 * h  + sumXA1) * 0.5
+                    disparity_repro[pt,ref] += (sumXA0 * arclength) * 0.5
                     if e == 0: plt_tits.append(polyX.getType())
 
                     dist  = vf.mydistance(dim, gp,  m_sample.x[e], polyX.value)
                     if (dist.sum(axis=0)> 1.e-12):
-                        print(' !!!! Error in ', polyX.getType(), ' representation = ', ds1)
+                        print(' !!!! Error in ', polyX.getType(), ' representation = ', dist)
 
                     # PLOT MODES IN LOGSCALE FOR ERROR, MESH AND CURVE
 
@@ -606,7 +686,7 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
                     basisEN = polyEN.getBasis(pE + 1, m_sample.z, gp) # degree 2 * p => order 2 * p +1
                     basisED = polyED.getBasis(pE + 1, m_sample.z, gp) # degree 2 * p => order 2 * p +1
 
-                    basisA  = polyA.getBasis (pS + 1, m_sample.z, gp) # degree 2 * p => order 2 * p +1
+                    basisA  = polyA.getBasis (pT + 1, m_sample.z, gp) # degree 2 * p => order 2 * p +1
                     basisX  = polyX.getBasis (pX + 1, m_sample.z, gp) # degree 2 * p => order 2 * p +1
 
                     # break expansion
@@ -615,7 +695,7 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
                         errAn.plot_basis(xp, f_poly,  n_poly_tests, pt + 1, polyET.getType(), m_sample.z, basisET, pE + 1)
 
                     for k in range(gp):
-                        for j in range(pS + 1):
+                        for j in range(pT + 1):
                             aot_exp_by_mode[pt, j, gp * e  + k] = polyA.node[j] * basisA[k,j]
                             if j <= pE:
                                 et_exp_by_mode[pt, j, gp * e  + k]  = polyET.node[j] * basisET[k,j]
@@ -669,6 +749,17 @@ class TestDistanceFunctionOptimization(unittest.TestCase):
             name='Disparity using a ' + reconstruction[pt] + ' basis and ' + poly_type[pt] + \
                 ' polynomials. Solving with ' + quadrature[pt]+ ' rules'
             errAn.convergence_IO(nR, ne, disparity_repro[pt], pX, pT, name)
+        name=' WEAK T EQUATION EXPECT ' + str(pT + 1)
+        errAn.convergence_IO(nR, ne, l2_t_wh, pX, pT, name)
+
+        name=' L2 ERROR ET: IN X FRAME EXPECT ' + str(pT + 1)
+        errAn.convergence_IO(nR, ne, l2_e_fx, pX, pT, name)
+        name=' L2 ERROR ET: IN ALPHA FRAME EXPECT ' + str(pT + 1)
+        errAn.convergence_IO(nR, ne, l2_e_fa, pX, pT, name)
+        name=' L2 ERROR CONVERGENCE FOR T IN ALPHA FRAME EXPECT ' + str(pT + 1)
+        errAn.convergence_IO(nR, ne, l2_t_fa, pX, pT, name)
+        name=' L2 ERROR CONVERGENCE FOR T IN MESH FRAME EXPECT ' + str(pT + 1)
+        errAn.convergence_IO(nR, ne, l2_t_fx, pX, pT, name)
         if (visType == 1): plt.show()
 
 
